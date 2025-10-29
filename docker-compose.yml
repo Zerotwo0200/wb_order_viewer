@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: wbuser
+      POSTGRES_PASSWORD: wbpass
+      POSTGRES_DB: wborders
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wbuser -d wborders"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  nats-streaming:
+    image: nats-streaming:0.25.6
+    command: [
+      "--cluster_id=wb-cluster",
+      "--store=memory",
+      "--max_inactivity=0"
+    ]
+    ports:
+      - "4223:4222"
+      - "8223:8222"
+
+volumes:
+  pgdata:
+
+

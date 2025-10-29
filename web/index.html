@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WB Order Viewer</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Roboto, sans-serif;
+        background: #f4f5f7;
+        margin: 0;
+        padding: 0;
+        color: #222;
+      }
+
+      header {
+        background: linear-gradient(135deg, #800080, #c71585);
+        color: white;
+        padding: 1.5rem 2rem;
+        text-align: center;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      }
+
+      main {
+        max-width: 800px;
+        margin: 2rem auto;
+        background: white;
+        padding: 2rem;
+        border-radius: 16px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 1.8rem;
+      }
+
+      p {
+        margin-top: 0.5rem;
+        color: #ffffff;
+        font-weight: bold;
+      }
+
+      .search-box {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1.5rem;
+      }
+
+      input {
+        flex: 1;
+        padding: 0.8rem 1rem;
+        font-size: 1rem;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        transition: border-color 0.2s, box-shadow 0.2s;
+      }
+
+      input:focus {
+        border-color: #c71585;
+        box-shadow: 0 0 0 2px rgba(199, 21, 133, 0.15);
+        outline: none;
+      }
+
+      button {
+        background: linear-gradient(135deg, #800080, #c71585);
+        border: none;
+        color: white;
+        padding: 0.8rem 1.5rem;
+        font-size: 1rem;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 0.3s, transform 0.1s;
+      }
+
+      button:hover {
+        background: linear-gradient(135deg, #a020f0, #d147a3);
+      }
+
+      button:active {
+        transform: scale(0.97);
+      }
+
+      h2 {
+        margin-top: 2rem;
+        color: #333;
+      }
+
+      pre {
+        background: #f9fafb;
+        border: 1px solid #eee;
+        padding: 1rem;
+        border-radius: 12px;
+        font-size: 0.9rem;
+        line-height: 1.4;
+        color: #111;
+        max-height: 500px;
+        overflow: auto;
+      }
+
+      .loading {
+        color: #999;
+        font-style: italic;
+      }
+
+      footer {
+        text-align: center;
+        color: #666;
+        font-size: 0.85rem;
+        margin-top: 3rem;
+        padding: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>WB Order Viewer</h1>
+      <p>Введите UID заказа, чтобы просмотреть данные</p>
+    </header>
+
+    <main>
+      <div class="search-box">
+        <input
+          id="orderId"
+          placeholder="Например: b563feb7b2b84b6test"
+          autocomplete="off"
+        />
+        <button id="loadBtn">Загрузить</button>
+      </div>
+
+      <h2>Результат</h2>
+      <pre id="result">{}</pre>
+    </main>
+
+    <footer>© 2025 WB Order Viewer — Демонстрационный сервис</footer>
+
+    <script>
+      const input = document.getElementById('orderId');
+      const btn = document.getElementById('loadBtn');
+      const out = document.getElementById('result');
+
+      async function load() {
+        const id = input.value.trim();
+        if (!id) {
+          out.textContent = 'Введите UID заказа!';
+          return;
+        }
+        out.textContent = 'Загрузка...';
+        out.classList.add('loading');
+        try {
+          const res = await fetch(`/api/order/${encodeURIComponent(id)}`);
+          if (!res.ok) {
+            out.textContent = `Ошибка ${res.status}: ${await res.text()}`;
+            out.classList.remove('loading');
+            return;
+          }
+          const data = await res.json();
+          out.textContent = JSON.stringify(data, null, 2);
+        } catch (e) {
+          out.textContent = 'Ошибка запроса: ' + e;
+        } finally {
+          out.classList.remove('loading');
+        }
+      }
+
+      btn.addEventListener('click', load);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') load();
+      });
+    </script>
+  </body>
+</html>
