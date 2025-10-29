@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>WB Order Viewer</title>
+    <title>RWB Order Viewer</title>
     <style>
       * {
         box-sizing: border-box;
@@ -90,6 +90,42 @@
         color: #333;
       }
 
+      .section {
+        margin-top: 1.5rem;
+        border: 1px solid #eee;
+        border-radius: 12px;
+        padding: 1rem;
+        background: #fafbfc;
+      }
+
+      .grid-2 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 12px;
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        gap: 8px 12px;
+        align-items: start;
+      }
+
+      .muted {
+        color: #666;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th, td {
+        border-bottom: 1px solid #eee;
+        padding: 8px 6px;
+        text-align: left;
+      }
+
       pre {
         background: #f9fafb;
         border: 1px solid #eee;
@@ -118,7 +154,7 @@
   </head>
   <body>
     <header>
-      <h1>WB Order Viewer</h1>
+      <h1>RWB Order Viewer</h1>
       <p>Введите UID заказа, чтобы просмотреть данные</p>
     </header>
 
@@ -133,15 +169,150 @@
       </div>
 
       <h2>Результат</h2>
-      <pre id="result">{}</pre>
+
+      <div id="resultSections" style="display:none;">
+        <div class="section" id="summarySection">
+          <h3>Сводка</h3>
+          <div class="grid-2">
+            <div><span class="muted">UID заказа:</span><div id="sum_uid"></div></div>
+            <div><span class="muted">Трек‑номер:</span><div id="sum_track"></div></div>
+            <div><span class="muted">Сервис доставки:</span><div id="sum_service"></div></div>
+            <div><span class="muted">Дата создания:</span><div id="sum_date"></div></div>
+          </div>
+        </div>
+
+        <div class="section" id="deliverySection">
+          <h3>Доставка</h3>
+          <div class="kv">
+            <div class="muted">Имя</div><div id="del_name"></div>
+            <div class="muted">Телефон</div><div id="del_phone"></div>
+            <div class="muted">Email</div><div id="del_email"></div>
+            <div class="muted">Адрес</div><div id="del_addr"></div>
+            <div class="muted">Город</div><div id="del_city"></div>
+            <div class="muted">Регион</div><div id="del_region"></div>
+            <div class="muted">Индекс</div><div id="del_zip"></div>
+          </div>
+        </div>
+
+        <div class="section" id="paymentSection">
+          <h3>Оплата</h3>
+          <div class="kv">
+            <div class="muted">Транзакция</div><div id="pay_tx"></div>
+            <div class="muted">Провайдер</div><div id="pay_provider"></div>
+            <div class="muted">Валюта</div><div id="pay_currency"></div>
+            <div class="muted">Сумма</div><div id="pay_amount"></div>
+            <div class="muted">Доставка</div><div id="pay_delivery"></div>
+            <div class="muted">Товары</div><div id="pay_goods"></div>
+            <div class="muted">Банк</div><div id="pay_bank"></div>
+          </div>
+        </div>
+
+        <div class="section" id="itemsSection">
+          <h3>Товары</h3>
+          <div style="overflow:auto">
+            <table id="itemsTable">
+              <thead>
+                <tr>
+                  <th>Название</th>
+                  <th>Бренд</th>
+                  <th>Цена</th>
+                  <th>Скидка</th>
+                  <th>Итог</th>
+                  <th>Размер</th>
+                  <th>Статус</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Сырые данные (JSON)</h3>
+          <pre id="resultRaw">{}</pre>
+        </div>
+      </div>
+
+      <pre id="result" style="display:none;"></pre>
     </main>
 
-    <footer>© 2025 WB Order Viewer — Демонстрационный сервис</footer>
+    <footer>© 2025 RWB Order Viewer — Демонстрационный сервис</footer>
 
     <script>
       const input = document.getElementById('orderId');
       const btn = document.getElementById('loadBtn');
       const out = document.getElementById('result');
+      const sections = document.getElementById('resultSections');
+      const raw = document.getElementById('resultRaw');
+
+      function fmtNum(n) {
+        if (typeof n !== 'number') return n ?? '';
+        return new Intl.NumberFormat('ru-RU').format(n);
+      }
+
+      function fmtDate(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d)) return iso;
+        return d.toLocaleString('ru-RU');
+      }
+
+      function setText(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value ?? '';
+      }
+
+      function renderItems(items) {
+        const tbody = document.querySelector('#itemsTable tbody');
+        tbody.innerHTML = '';
+        (items || []).forEach((it) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${it.name ?? ''}</td>
+            <td>${it.brand ?? ''}</td>
+            <td>${fmtNum(it.price)}</td>
+            <td>${fmtNum(it.sale)}</td>
+            <td>${fmtNum(it.total_price)}</td>
+            <td>${it.size ?? ''}</td>
+            <td>${it.status ?? ''}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+
+      function renderOrder(data) {
+        // Summary
+        setText('sum_uid', data.order_uid);
+        setText('sum_track', data.track_number);
+        setText('sum_service', data.delivery_service);
+        setText('sum_date', fmtDate(data.date_created));
+
+        // Delivery
+        const d = data.delivery || {};
+        setText('del_name', d.name);
+        setText('del_phone', d.phone);
+        setText('del_email', d.email);
+        setText('del_addr', d.address);
+        setText('del_city', d.city);
+        setText('del_region', d.region);
+        setText('del_zip', d.zip);
+
+        // Payment
+        const p = data.payment || {};
+        setText('pay_tx', p.transaction);
+        setText('pay_provider', p.provider);
+        setText('pay_currency', p.currency);
+        setText('pay_amount', `${fmtNum(p.amount)} ${p.currency || ''}`.trim());
+        setText('pay_delivery', `${fmtNum(p.delivery_cost)} ${p.currency || ''}`.trim());
+        setText('pay_goods', `${fmtNum(p.goods_total)} ${p.currency || ''}`.trim());
+        setText('pay_bank', p.bank);
+
+        // Items
+        renderItems(data.items);
+
+        // Raw
+        raw.textContent = JSON.stringify(data, null, 2);
+      }
 
       async function load() {
         const id = input.value.trim();
@@ -149,6 +320,8 @@
           out.textContent = 'Введите UID заказа!';
           return;
         }
+        sections.style.display = 'none';
+        out.style.display = 'block';
         out.textContent = 'Загрузка...';
         out.classList.add('loading');
         try {
@@ -159,7 +332,9 @@
             return;
           }
           const data = await res.json();
-          out.textContent = JSON.stringify(data, null, 2);
+          renderOrder(data);
+          out.style.display = 'none';
+          sections.style.display = 'block';
         } catch (e) {
           out.textContent = 'Ошибка запроса: ' + e;
         } finally {
