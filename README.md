@@ -39,6 +39,12 @@ wb/
 ├── cmd/
 │   ├── server/      # Основной сервис (подписчик NATS + HTTP API)
 │   └── publisher/   # Публикатор тестового сообщения
+├── internal/
+│   ├── domain/      # Сущности и порты (интерфейсы хранилищ/кэша)
+│   ├── usecase/     # Юзкейсы: загрузка кэша, получение заказа, обработка входа
+│   └── adapter/
+│       ├── repo/    # Адаптер репозитория: PostgreSQL (JSONB upsert/load)
+│       └── cache/   # Адаптер кэша: in-memory
 ├── web/
 │   └── index.html   # Веб‑UI
 ├── model.json       # Пример данных заказа
@@ -63,8 +69,16 @@ NATS Streaming → Service → PostgreSQL (JSONB‑хранилище)
                          → In‑Memory Cache (быстрые чтения)
 ```
 
-При старте: кэш восстанавливается из PostgreSQL.  
-При сообщении: сохраняем в БД, обновляем кэш, затем ACK/NACK.
+Слои :
+- Domain: `internal/domain` — сущности и порты (интерфейсы)
+- UseCase: `internal/usecase` — сценарии работы с заказами
+- Adapters: `internal/adapter/*` — реализация портов (PostgreSQL, кэш)
+- Adapters: `internal/adapter/httpapi`, `internal/adapter/natsstan`, `internal/adapter/repo`, `internal/adapter/cache`
+- Composition: `cmd/server` — только сборка зависимостей и запуск
+
+Жизненный цикл:
+- При старте: юзкейс `LoadCache` восстанавливает кэш из PostgreSQL.  
+- При сообщении: юзкейс `ProcessIncomingOrder` сохраняет в БД, обновляет кэш, затем ACK.
 
 ### Команды (Windows CMD)
 
@@ -102,7 +116,20 @@ echo GET http://localhost:8080/api/order/b563feb7b2b84b6test | vegeta attack -ra
 
 :: Стресс‑тесты (WRK)
 
-docker run --rm williamyeh/wrk -t4 -c100 -d30s http://example.com
+docker run --rm williamyeh/wrk -t4 -c100 -d30s http://host.docker.internal:8080/order/b563feb7b2b84b6test
 ```
+
+### Пояснение по файлам (.go)
+- `cmd/server/main.go` — точка входа; сборка зависимостей, запуск HTTP и подписчика NATS.
+- `cmd/server/main_test.go` — юнит‑тесты HTTP/юзкейсов через адаптеры.
+- `cmd/server/bench_test.go` — бенчмарки обработчика и кэша.
+- `cmd/publisher/main.go` — утилита публикации тестового заказа в NATS Streaming (читает JSON из stdin).
+- `internal/domain/order.go` — доменная сущность заказа.
+- `internal/domain/ports.go` — доменные порты: репозиторий, кэш, подписчик; общие ошибки.
+- `internal/usecase/order_usecases.go` — юзкейсы: `LoadCache`, `GetOrderByID`, `ProcessIncomingOrder`.
+- `internal/adapter/repo/postgres_repo.go` — адаптер репозитория для PostgreSQL (upsert/load, EnsureSchema).
+- `internal/adapter/cache/memory_cache.go` — адаптер in‑memory кэша заказов.
+- `internal/adapter/httpapi/server.go` — HTTP‑сервер (маршрут `GET /api/order/{id}` + статика `web/`).
+- `internal/adapter/natsstan/subscriber.go` — адаптер подписки NATS Streaming (STAN) с ручным ACK.
 
 

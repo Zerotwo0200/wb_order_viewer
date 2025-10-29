@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gorilla/mux"
+	"github.com/example/wb-order-service/internal/adapter/cache"
+	"github.com/example/wb-order-service/internal/adapter/httpapi"
+	"github.com/example/wb-order-service/internal/adapter/repo"
+	"github.com/example/wb-order-service/internal/domain"
+	"github.com/example/wb-order-service/internal/usecase"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -23,53 +26,34 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 }
 
 func TestHandleGet(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
-
-	app := &App{
-		db:    pool,
-		cache: make(map[string]Order),
-	}
-
-	// Insert test data directly into cache
-	testOrder := Order{
+	// Use in-memory cache and HTTP adapter
+	orderCache := cache.NewMemoryOrderCache()
+	orderCache.Set("test-order-123", domain.Order{
 		OrderUID:    "test-order-123",
 		TrackNumber: "TRACK123",
 		Entry:       "TEST",
 		Locale:      "en",
 		SmID:        99,
-	}
-	app.cache["test-order-123"] = testOrder
+	})
+	ucGet := usecase.GetOrderByID{Cache: orderCache}
+	srv := httpapi.NewServer(ucGet)
 
 	tests := []struct {
 		name     string
 		orderID  string
 		wantCode int
 	}{
-		{
-			name:     "existing order",
-			orderID:  "test-order-123",
-			wantCode: http.StatusOK,
-		},
-		{
-			name:     "non-existing order",
-			orderID:  "non-existent",
-			wantCode: http.StatusNotFound,
-		},
+		{name: "existing order", orderID: "test-order-123", wantCode: http.StatusOK},
+		{name: "non-existing order", orderID: "non-existent", wantCode: http.StatusNotFound},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/order/"+tt.orderID, nil)
 			w := httptest.NewRecorder()
-
-			// Create a mux route for testing
-			r := mux.NewRouter()
-			r.HandleFunc("/api/order/{id}", app.handleGet).Methods(http.MethodGet)
-			r.ServeHTTP(w, req)
-
+			srv.Router.ServeHTTP(w, req)
 			if w.Code != tt.wantCode {
-				t.Errorf("handleGet() = %v, want %v", w.Code, tt.wantCode)
+				t.Errorf("GET status = %v, want %v", w.Code, tt.wantCode)
 			}
 		})
 	}
@@ -88,23 +72,14 @@ func TestCacheRecovery(t *testing.T) {
 		t.Fatalf("Failed to insert test data: %v", err)
 	}
 
-	// Create app and load cache
-	app := &App{
-		db:    pool,
-		cache: make(map[string]Order),
+	// Use usecase.LoadCache
+	orderCache := cache.NewMemoryOrderCache()
+	uc := usecase.LoadCache{Repo: repo.NewPostgresOrderRepo(pool), Cache: orderCache}
+	if err := uc.Execute(context.Background()); err != nil {
+		t.Fatalf("LoadCache error = %v", err)
 	}
-
-	if err := app.loadCache(context.Background()); err != nil {
-		t.Fatalf("loadCache() error = %v", err)
-	}
-
-	// Check if order is in cache
-	order, ok := app.cache["recovery-test"]
-	if !ok {
-		t.Error("loadCache() failed to load order from DB")
-	}
-	if order.OrderUID != "recovery-test" {
-		t.Errorf("loadCache() order ID = %v, want 'recovery-test'", order.OrderUID)
+	if _, ok := orderCache.Get("recovery-test"); !ok {
+		t.Error("LoadCache failed to load order from DB")
 	}
 }
 
@@ -112,36 +87,17 @@ func TestOrderProcessing(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
 
-	app := &App{
-		db:    pool,
-		cache: make(map[string]Order),
-	}
+	orderCache := cache.NewMemoryOrderCache()
+	uc := usecase.ProcessIncomingOrder{Repo: repo.NewPostgresOrderRepo(pool), Cache: orderCache}
 
-	// Simulate NATS message processing
 	testJSON := `{"order_uid":"process-test","track_number":"TRACK001","entry":"WBIL","delivery":{},"payment":{},"items":[],"locale":"en","sm_id":99}`
-
-	var order Order
-	if err := json.Unmarshal([]byte(testJSON), &order); err != nil {
-		t.Fatalf("Failed to unmarshal test order: %v", err)
+	if err := uc.Execute(context.Background(), []byte(testJSON)); err != nil {
+		t.Fatalf("ProcessIncomingOrder error: %v", err)
 	}
-
-	if order.OrderUID == "" {
-		t.Error("Order missing order_uid")
-	}
-
-	// Persist to DB
-	_, err := pool.Exec(context.Background(),
-		"INSERT INTO orders(order_uid, payload) VALUES($1, $2::jsonb) ON CONFLICT (order_uid) DO UPDATE SET payload = EXCLUDED.payload",
-		order.OrderUID, testJSON)
-	if err != nil {
-		t.Fatalf("Failed to persist order: %v", err)
-	}
-
-	// Update cache
-	app.cache[order.OrderUID] = order
-
-	// Verify in cache
-	if _, ok := app.cache["process-test"]; !ok {
+	if _, ok := orderCache.Get("process-test"); !ok {
 		t.Error("Order not found in cache after processing")
 	}
 }
+
+// poolForNoop is a helper for creating a pool when not used (kept to satisfy constructors if needed)
+func poolForNoop() *pgxpool.Pool { return nil }
